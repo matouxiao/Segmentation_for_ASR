@@ -7,30 +7,25 @@
   },
   "data": {
     "train_file": "data/large_data_train.jsonl",
-    "val_file": null,
+    "val_file": "data/paragraph_data_test_4000.jsonl", 
     "test_file": "data/paragraph_data_test_sentence_level.jsonl",
     "max_length": 512,
     "window_size": 30,
     "window_overlap": 10,
     "context_sentences": 4,
     "max_tokens_per_window": 500,
-    "num_workers": 10
+    "num_workers": 12 
   },
   "training": {
     "batch_size": 192,
-    "num_epochs": 12,
-    "learning_rate": 5e-5,
+    "num_epochs": 10,
+    "learning_rate": 3e-5, 
     "weight_decay": 0.01,
     "loss_type": "weighted_ce",
-    "class_weights": [1.0, 6.8],
-    "focal_alpha": 1.0,
-    "focal_gamma": 2.0,
+    "class_weights": [1.0, 6.8], 
     "save_dir": "./output_model",
     "save_every": 1,
     "warmup_ratio": 0.05,
-    "early_stopping_patience": 5
-  },
-  "evaluation": {
-    "metrics": ["accuracy", "precision", "recall", "f1"]
+    "early_stopping_patience": 3
   }
 }

@@ -355,6 +355,28 @@ def train():
         pin_memory=True if torch.cuda.is_available() else False
     )
 
+    VAL_DATA_PATH = CONFIG["data"].get("val_file") # 确保 config 里填了路径
+    val_loader = None
+    if VAL_DATA_PATH:
+        print(f"Loading validation dataset from {VAL_DATA_PATH}...")
+        val_dataset = ParagraphSegmentationDataset(
+            VAL_DATA_PATH, 
+            tokenizer, 
+            max_length=MAX_LENGTH,
+            window_size=WINDOW_SIZE,
+            window_overlap=WINDOW_OVERLAP,
+            context_sentences=CONTEXT_SENTENCES,
+            max_tokens_per_window=MAX_TOKENS_PER_WINDOW
+        )
+        val_loader = DataLoader(
+            val_dataset, 
+            batch_size=BATCH_SIZE, 
+            shuffle=False, 
+            num_workers=NUM_WORKERS,
+            pin_memory=True
+        )
+        print(f"Validation dataset size: {len(val_dataset)}")
+
     # 3. 加载模型
     print(f"Loading model from {MODEL_PATH}...")
     model = BertForSequenceClassification.from_pretrained(MODEL_PATH, num_labels=CONFIG["model"]["num_labels"])
@@ -385,14 +407,17 @@ def train():
     model.train()
     scaler = torch.cuda.amp.GradScaler() if torch.cuda.is_available() else None
 
+    best_f1 = 0
+    patience_counter = 0
+
     for epoch in range(EPOCHS):
         total_loss = 0
         loop = tqdm(train_loader, desc=f"Epoch {epoch+1}/{EPOCHS}")
         
         for step, batch in enumerate(loop):
-            input_ids = batch['input_ids'].to(DEVICE)
-            attention_mask = batch['attention_mask'].to(DEVICE)
-            labels = batch['labels'].to(DEVICE)
+            input_ids = batch['input_ids'].to(DEVICE, non_blocking=True)
+            attention_mask = batch['attention_mask'].to(DEVICE, non_blocking=True)
+            labels = batch['labels'].to(DEVICE, non_blocking=True)
 
             optimizer.zero_grad()
 
@@ -448,6 +473,61 @@ def train():
         model.save_pretrained(epoch_save_path)
         tokenizer.save_pretrained(epoch_save_path)
         print(f"Epoch {epoch+1} saved to {epoch_save_path}")
+
+        # --- 每个 Epoch 结束后的验证逻辑 (放在训练循环内，保存逻辑前) ---
+        model.eval()
+        val_loss = 0
+        all_preds, all_labels = [], []
+        
+        with torch.no_grad():
+            for val_batch in tqdm(val_loader, desc=f"Validating Epoch {epoch+1}"):
+                input_ids = val_batch['input_ids'].to(DEVICE, non_blocking=True)
+                attention_mask = val_batch['attention_mask'].to(DEVICE, non_blocking=True)
+                labels = val_batch['labels'].to(DEVICE, non_blocking=True)
+                outputs = model(input_ids, attention_mask=attention_mask)
+                
+                loss = criterion(outputs.logits, labels)
+                val_loss += loss.item()
+                
+                preds = torch.argmax(outputs.logits, dim=1)
+                all_preds.extend(preds.cpu().numpy())
+                all_labels.extend(labels.cpu().numpy())
+        
+        # 计算指标
+        from sklearn.metrics import f1_score, recall_score, precision_score
+        avg_val_loss = val_loss / len(val_loader)
+        f1 = f1_score(all_labels, all_preds)
+        rec = recall_score(all_labels, all_preds)
+        pre = precision_score(all_labels, all_preds)
+        
+        print(f"\n[Epoch {epoch+1}] Val Loss: {avg_val_loss:.4f} | F1: {f1:.4f} | Pre: {pre:.4f} | Rec: {rec:.4f}")
+        
+        swanlab.log({
+            "val/loss": avg_val_loss,
+            "val/f1": f1,
+            "val/recall": rec,
+            "val/precision": pre,
+            "val/epoch": epoch + 1
+        })
+
+        # --- 保存最佳模型逻辑 ---
+        if f1 > best_f1:
+            best_f1 = f1
+            patience_counter = 0
+            best_model_path = os.path.join(SAVE_PATH, "best_model")
+            model.save_pretrained(best_model_path)
+            tokenizer.save_pretrained(best_model_path)
+            print(f"New best F1: {best_f1:.4f}! Model saved to {best_model_path}")
+        else:
+            patience_counter += 1
+            print(f"F1 did not improve. Patience: {patience_counter}/{CONFIG['training']['early_stopping_patience']}")
+
+        # --- 早停检查 ---
+        if patience_counter >= CONFIG["training"]["early_stopping_patience"]:
+            print("Early stopping triggered. Training stopped.")
+            break
+
+        model.train() # 切回训练模式
     
     print("Training completed!")
     swanlab.finish()
