@@ -17,7 +17,7 @@ def load_model(model_path, num_labels=2):
     print(f"Model loaded. Device: {DEVICE}", file=sys.stderr)
     return model
 
-def analyze_segmentation(model, tokenizer, test_file, config, threshold=0.7):
+def analyze_segmentation(model, tokenizer, test_file, config, threshold):
     """分析分段效果，返回结构化数据"""
     window_size = config["data"].get("window_size", 20)
     window_overlap = config["data"].get("window_overlap", 10)
@@ -216,7 +216,7 @@ def main():
                        help='模型路径')
     parser.add_argument('--test_file', type=str, default='data/10piece_test.jsonl',
                        help='测试文件路径')
-    parser.add_argument('--threshold', type=float, default=0.9,
+    parser.add_argument('--threshold', type=float, default=0.88,
                        help='分段阈值')
     parser.add_argument('--output', type=str, default='results.json',
                        help='输出JSON文件路径（默认：results.json）')

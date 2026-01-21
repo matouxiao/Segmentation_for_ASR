@@ -3,10 +3,10 @@
     "model_path": "sentence_bert_wwm",
     "bert_model_name": "bert-base-multilingual-cased",
     "num_labels": 2,
-    "dropout_rate": 0.15
+    "dropout_rate": 0.1
   },
   "data": {
-    "train_file": "data/paragraph_data_train_sentence_level.jsonl",
+    "train_file": "data/large_data_train.jsonl",
     "val_file": null,
     "test_file": "data/paragraph_data_test_sentence_level.jsonl",
     "max_length": 512,
@@ -14,20 +14,20 @@
     "window_overlap": 10,
     "context_sentences": 2,
     "max_tokens_per_window": 500,
-    "num_workers": 4
+    "num_workers": 10
   },
   "training": {
     "batch_size": 64,
-    "num_epochs": 3,
-    "learning_rate": 2e-5,
+    "num_epochs": 8,
+    "learning_rate": 3e-5,
     "weight_decay": 0.01,
     "loss_type": "weighted_ce",
-    "class_weights": [1.0, 3.9],
+    "class_weights": [1.0, 6.8],
     "focal_alpha": 1.0,
     "focal_gamma": 2.0,
     "save_dir": "./output_model",
     "save_every": 1,
-    "warmup_ratio": 0.1,
+    "warmup_ratio": 0.05,
     "early_stopping_patience": 5
   },
   "evaluation": {
