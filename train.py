@@ -152,18 +152,36 @@ class ParagraphSegmentationDataset(Dataset):
         seq2 = " ".join(seq2_parts)
         
         # 使用BERT tokenizer编码句子对（带上下文）
+        # 修改：使用 truncation=True 确保总长度不超过 max_length
         encoded = self.tokenizer(
             seq1,
             seq2,
             max_length=self.max_length,
             padding='max_length',
-            truncation='only_second',  # 优先截断第二个序列（句子2+后上下文）
+            truncation=True,  # 改为 True，确保总长度不超过 max_length
             return_tensors='pt'
         )
         
+        # 确保返回的 tensor 形状正确
+        input_ids = encoded['input_ids'].squeeze(0)
+        attention_mask = encoded['attention_mask'].squeeze(0)
+        
+        # 安全检查：如果长度不对，强制截断/填充
+        if input_ids.size(0) != self.max_length:
+            # 如果长度超过 max_length，截断
+            if input_ids.size(0) > self.max_length:
+                input_ids = input_ids[:self.max_length]
+                attention_mask = attention_mask[:self.max_length]
+            # 如果长度小于 max_length，填充
+            elif input_ids.size(0) < self.max_length:
+                pad_length = self.max_length - input_ids.size(0)
+                pad_token_id = self.tokenizer.pad_token_id if self.tokenizer.pad_token_id is not None else 0
+                input_ids = torch.cat([input_ids, torch.full((pad_length,), pad_token_id, dtype=input_ids.dtype)])
+                attention_mask = torch.cat([attention_mask, torch.zeros(pad_length, dtype=attention_mask.dtype)])
+        
         return {
-            'input_ids': encoded['input_ids'].squeeze(0),
-            'attention_mask': encoded['attention_mask'].squeeze(0),
+            'input_ids': input_ids.detach(), # 确保不带梯度轨迹
+            'attention_mask': attention_mask.detach(),
             'labels': torch.tensor(item['label'], dtype=torch.long)
         }
     
