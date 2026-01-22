@@ -277,7 +277,7 @@ def main():
     """主函数"""
     import argparse
     parser = argparse.ArgumentParser(description='测试自然段划分模型')
-    parser.add_argument('--model_path', type=str, default='./output_model/checkpoint_epoch_3',
+    parser.add_argument('--model_path', type=str, default='./output_model/checkpoint_epoch_8',
                        help='模型路径')
     parser.add_argument('--test_file', type=str, default=None,
                        help='测试文件路径（默认使用config.json中的test_file）')

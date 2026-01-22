@@ -8,7 +8,7 @@
   "data": {
     "train_file": "data/large_data_train.jsonl",
     "val_file": "data/paragraph_data_test_4000.jsonl", 
-    "test_file": "data/paragraph_data_test_sentence_level.jsonl",
+    "test_file": "data/test.jsonl",
     "max_length": 512,
     "window_size": 30,
     "window_overlap": 10,

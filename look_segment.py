@@ -212,9 +212,9 @@ def analyze_segmentation(model, tokenizer, test_file, config, threshold):
 def main():
     import argparse
     parser = argparse.ArgumentParser(description='分析模型分段效果并输出JSON')
-    parser.add_argument('--model_path', type=str, default='./output_model/checkpoint_epoch_3',
+    parser.add_argument('--model_path', type=str, default='./output_model/checkpoint_epoch_8',
                        help='模型路径')
-    parser.add_argument('--test_file', type=str, default='data/10piece_test.jsonl',
+    parser.add_argument('--test_file', type=str, default='data/output2_processed_merged.json',
                        help='测试文件路径')
     parser.add_argument('--threshold', type=float, default=0.88,
                        help='分段阈值')
