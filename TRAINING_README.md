@@ -23,7 +23,7 @@ python train.py
 python train.py --resume_from checkpoint_epoch_8
 
 # 或使用完整路径
-python train.py --resume_from ./output_model/checkpoint_epoch_8
+python train.py --resume_from /workapp/Segmentation_for_ASR/outout_model1/checkpoint_epoch_10
 ```
 
 ## 训练状态保存

@@ -7,17 +7,18 @@
   },
   "data": {
     "train_file": "data/large_data_train.jsonl",
-    "val_file": "models/Segment/data/eval_set.jsonl", 
-    "test_file": "models/Segment/data/eval_set.jsonl",
+    "val_file": "data/eval_set.jsonl", 
+    "test_file": "data/eval_set.jsonl",
     "max_length": 512,
     "window_size": 30,
     "window_overlap": 10,
     "context_sentences": 4,
     "max_tokens_per_window": 500,
-    "num_workers": 12 
+    "num_workers": 12,
+    "adaptive_context": true
   },
   "training": {
-    "batch_size": 192,
+    "batch_size": 320,
     "num_epochs": 50,
     "learning_rate": 3e-5, 
     "weight_decay": 0.01,

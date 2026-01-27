@@ -34,13 +34,15 @@ class ParagraphSegmentationDataset(Dataset):
     """
     def __init__(self, jsonl_path, tokenizer, max_length=512, 
                  window_size=20, window_overlap=10, 
-                 context_sentences=2, max_tokens_per_window=500):
+                 context_sentences=2, max_tokens_per_window=500,
+                 adaptive_context=True):
         self.tokenizer = tokenizer
         self.max_length = max_length
         self.window_size = window_size
         self.window_overlap = window_overlap
         self.context_sentences = context_sentences
         self.max_tokens_per_window = max_tokens_per_window
+        self.adaptive_context = adaptive_context
         self.data = []
         
         # 读取JSONL文件并处理
@@ -93,8 +95,32 @@ class ParagraphSegmentationDataset(Dataset):
                 if not sent1 or not sent2:
                     continue
                 
-                # 获取上下文句子
-                context_before = window_sentences[max(0, i - self.context_sentences):i]
+                # 获取上下文句子（自适应窗口）
+                if self.adaptive_context:
+                    # 找到当前位置之前最近的分段点
+                    nearest_segment = self._find_nearest_segment_before(original_idx, segment_positions)
+                    
+                    if nearest_segment is not None:
+                        # 分段点在 nearest_segment 和 nearest_segment+1 之间
+                        # 所以上下文应该从 nearest_segment + 1 开始
+                        context_start_idx = nearest_segment + 1
+                    else:
+                        # 没有分段点，使用固定窗口
+                        context_start_idx = max(0, original_idx - self.context_sentences)
+                    
+                    # 计算窗口内的相对索引
+                    window_context_start = max(0, context_start_idx - start_idx)
+                    window_context_end = i
+                    
+                    # 获取上下文句子（最多 context_sentences 句）
+                    context_before = window_sentences[window_context_start:window_context_end]
+                    # 如果上下文超过 context_sentences 句，只取最近的 context_sentences 句
+                    if len(context_before) > self.context_sentences:
+                        context_before = context_before[-self.context_sentences:]
+                else:
+                    # 使用固定窗口（原有逻辑）
+                    context_before = window_sentences[max(0, i - self.context_sentences):i]
+                
                 context_after = window_sentences[i + 2:min(len(window_sentences), i + 2 + self.context_sentences)]
                 
                 # 标签：如果original_idx在segment_positions中，则为1（需要分段），否则为0
@@ -130,6 +156,23 @@ class ParagraphSegmentationDataset(Dataset):
                 estimated_tokens = int(total_chars * 1.5)
         
         return window_sentences
+    
+    def _find_nearest_segment_before(self, position, segment_positions):
+        """
+        找到指定位置之前最近的分段点
+        
+        Args:
+            position: 当前位置（原始句子索引）
+            segment_positions: 分段点集合
+            
+        Returns:
+            最近的分段点位置，如果没有则返回 None
+        """
+        # 找到所有小于 position 的分段点
+        before_segments = [pos for pos in segment_positions if pos < position]
+        if before_segments:
+            return max(before_segments)  # 返回最大的（最近的）
+        return None
     
     def __len__(self):
         return len(self.data)
@@ -369,6 +412,7 @@ def train(resume_from=None):
     WINDOW_OVERLAP = CONFIG["data"].get("window_overlap", 10)
     CONTEXT_SENTENCES = CONFIG["data"].get("context_sentences", 2)
     MAX_TOKENS_PER_WINDOW = CONFIG["data"].get("max_tokens_per_window", 500)
+    ADAPTIVE_CONTEXT = CONFIG["data"].get("adaptive_context", True)
     
     # 更新swanlab配置（添加窗口参数）
     swanlab.config.update({
@@ -376,10 +420,12 @@ def train(resume_from=None):
         "window_overlap": WINDOW_OVERLAP,
         "context_sentences": CONTEXT_SENTENCES,
         "max_tokens_per_window": MAX_TOKENS_PER_WINDOW,
+        "adaptive_context": ADAPTIVE_CONTEXT,
     })
     
     print(f"Loading dataset from {DATA_PATH}...")
     print(f"Window parameters: size={WINDOW_SIZE}, overlap={WINDOW_OVERLAP}, context={CONTEXT_SENTENCES}")
+    print(f"Adaptive context: {ADAPTIVE_CONTEXT}")
     dataset = ParagraphSegmentationDataset(
         DATA_PATH, 
         tokenizer, 
@@ -387,7 +433,8 @@ def train(resume_from=None):
         window_size=WINDOW_SIZE,
         window_overlap=WINDOW_OVERLAP,
         context_sentences=CONTEXT_SENTENCES,
-        max_tokens_per_window=MAX_TOKENS_PER_WINDOW
+        max_tokens_per_window=MAX_TOKENS_PER_WINDOW,
+        adaptive_context=ADAPTIVE_CONTEXT
     )
     print(f"Dataset size: {len(dataset)}")
     
@@ -427,7 +474,8 @@ def train(resume_from=None):
             window_size=WINDOW_SIZE,
             window_overlap=WINDOW_OVERLAP,
             context_sentences=CONTEXT_SENTENCES,
-            max_tokens_per_window=MAX_TOKENS_PER_WINDOW
+            max_tokens_per_window=MAX_TOKENS_PER_WINDOW,
+            adaptive_context=ADAPTIVE_CONTEXT
         )
         val_loader = DataLoader(
             val_dataset, 
@@ -507,7 +555,8 @@ def train(resume_from=None):
 
     for epoch in range(start_epoch, EPOCHS):
         total_loss = 0
-        loop = tqdm(train_loader, desc=f"Epoch {epoch+1}/{EPOCHS}")
+        loop = tqdm(train_loader, desc=f"Epoch {epoch+1}/{EPOCHS}", 
+            position=0, leave=True, dynamic_ncols=True)
         
         for step, batch in enumerate(loop):
             input_ids = batch['input_ids'].to(DEVICE, non_blocking=True)
@@ -590,7 +639,8 @@ def train(resume_from=None):
         all_preds, all_labels = [], []
         
         with torch.no_grad():
-            for val_batch in tqdm(val_loader, desc=f"Validating Epoch {epoch+1}"):
+            for val_batch in tqdm(val_loader, desc=f"Validating Epoch {epoch+1}", 
+                      position=0, leave=True, dynamic_ncols=True):
                 input_ids = val_batch['input_ids'].to(DEVICE, non_blocking=True)
                 attention_mask = val_batch['attention_mask'].to(DEVICE, non_blocking=True)
                 labels = val_batch['labels'].to(DEVICE, non_blocking=True)
