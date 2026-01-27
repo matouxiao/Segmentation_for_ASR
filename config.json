@@ -7,8 +7,8 @@
   },
   "data": {
     "train_file": "data/large_data_train.jsonl",
-    "val_file": "data/paragraph_data_test_4000.jsonl", 
-    "test_file": "data/test.jsonl",
+    "val_file": "models/Segment/data/eval_set.jsonl", 
+    "test_file": "models/Segment/data/eval_set.jsonl",
     "max_length": 512,
     "window_size": 30,
     "window_overlap": 10,
@@ -18,12 +18,12 @@
   },
   "training": {
     "batch_size": 192,
-    "num_epochs": 10,
+    "num_epochs": 50,
     "learning_rate": 3e-5, 
     "weight_decay": 0.01,
     "loss_type": "weighted_ce",
-    "class_weights": [1.0, 6.8], 
-    "save_dir": "./output_model",
+    "class_weights": [1.0, 5.8], 
+    "save_dir": "./output_model1",
     "save_every": 1,
     "warmup_ratio": 0.05,
     "early_stopping_patience": 3

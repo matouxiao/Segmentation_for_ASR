@@ -9,8 +9,12 @@ from tqdm import tqdm
 import swanlab
 
 # 1. 加载配置文件
-def load_config(config_path="config.json"):
+def load_config(config_path=None):
     """加载配置文件"""
+    if config_path is None:
+        # 使用脚本所在目录下的config.json
+        script_dir = os.path.dirname(os.path.abspath(__file__))
+        config_path = os.path.join(script_dir, "config.json")
     with open(config_path, 'r', encoding='utf-8') as f:
         config = json.load(f)
     return config
@@ -244,7 +248,13 @@ class ParagraphSegmentationDataset(Dataset):
         
         return window_info
 
-def train():
+def train(resume_from=None):
+    """
+    训练函数
+    
+    Args:
+        resume_from: 从指定checkpoint恢复训练，格式如 "checkpoint_epoch_8" 或完整路径
+    """
     # 从配置文件读取参数
     MODEL_PATH = CONFIG["model"]["model_path"]
     DATA_PATH = CONFIG["data"]["train_file"]
@@ -257,6 +267,51 @@ def train():
     WEIGHT_DECAY = CONFIG["training"]["weight_decay"]
     WARMUP_RATIO = CONFIG["training"]["warmup_ratio"]
     CLASS_WEIGHTS = CONFIG["training"]["class_weights"]
+    
+    # 处理模型路径：如果是相对路径，转换为绝对路径
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    if not os.path.isabs(MODEL_PATH):
+        # 检查是否是本地路径
+        local_model_path = os.path.join(script_dir, MODEL_PATH)
+        if os.path.exists(local_model_path):
+            MODEL_PATH = local_model_path
+        else:
+            # 如果本地不存在，尝试使用相对路径（transformers会自动处理）
+            MODEL_PATH = os.path.join(script_dir, MODEL_PATH) if os.path.exists(os.path.join(script_dir, MODEL_PATH)) else MODEL_PATH
+    
+    # 处理数据路径
+    if not os.path.isabs(DATA_PATH):
+        DATA_PATH = os.path.join(script_dir, DATA_PATH)
+    
+    # 处理保存路径
+    if not os.path.isabs(SAVE_PATH):
+        SAVE_PATH = os.path.join(script_dir, SAVE_PATH)
+    
+    # 处理恢复训练
+    start_epoch = 0
+    global_step = 0
+    best_f1 = 0
+    if resume_from:
+        # 确定checkpoint路径
+        if os.path.isabs(resume_from) or os.path.exists(resume_from):
+            checkpoint_path = resume_from
+        else:
+            # 假设是checkpoint名称，如 "checkpoint_epoch_8"
+            checkpoint_path = os.path.join(SAVE_PATH, resume_from)
+        
+        if not os.path.exists(checkpoint_path):
+            print(f"警告: Checkpoint路径不存在: {checkpoint_path}")
+            print("将从头开始训练")
+            resume_from = None
+        else:
+            # 从checkpoint名称提取epoch编号
+            if "checkpoint_epoch_" in resume_from:
+                try:
+                    start_epoch = int(resume_from.split("checkpoint_epoch_")[1])
+                    print(f"将从 Epoch {start_epoch + 1} 继续训练")
+                except:
+                    print(f"无法从checkpoint名称提取epoch编号，将从checkpoint加载模型权重")
+            MODEL_PATH = checkpoint_path  # 使用checkpoint路径加载模型
     
     # 打印配置信息
     print("=" * 60)
@@ -301,7 +356,13 @@ def train():
         os.makedirs(SAVE_PATH)
 
     print(f"Loading tokenizer from {MODEL_PATH}...")
-    tokenizer = BertTokenizer.from_pretrained(MODEL_PATH)
+    # 优先使用本地文件，避免网络请求
+    try:
+        tokenizer = BertTokenizer.from_pretrained(MODEL_PATH, local_files_only=True)
+    except:
+        # 如果本地文件不存在，尝试从网络下载（但通常不应该发生）
+        print("警告: 本地文件不存在，尝试从网络加载（可能失败）...")
+        tokenizer = BertTokenizer.from_pretrained(MODEL_PATH)
     
     # 从配置读取窗口参数
     WINDOW_SIZE = CONFIG["data"].get("window_size", 20)
@@ -379,7 +440,11 @@ def train():
 
     # 3. 加载模型
     print(f"Loading model from {MODEL_PATH}...")
-    model = BertForSequenceClassification.from_pretrained(MODEL_PATH, num_labels=CONFIG["model"]["num_labels"])
+    try:
+        model = BertForSequenceClassification.from_pretrained(MODEL_PATH, num_labels=CONFIG["model"]["num_labels"], local_files_only=True)
+    except:
+        print("警告: 本地文件加载失败，尝试从网络加载（可能失败）...")
+        model = BertForSequenceClassification.from_pretrained(MODEL_PATH, num_labels=CONFIG["model"]["num_labels"])
     model.to(DEVICE)
     print(f"Model loaded. Device: {DEVICE}")
 
@@ -397,20 +462,50 @@ def train():
         num_training_steps=total_steps
     )
     
+    # 5. 如果从checkpoint恢复，尝试加载训练状态
+    if resume_from and os.path.exists(checkpoint_path):
+        training_state_path = os.path.join(checkpoint_path, "training_state.pt")
+        if os.path.exists(training_state_path):
+            print(f"加载训练状态从: {training_state_path}")
+            try:
+                training_state = torch.load(training_state_path, map_location=DEVICE)
+                optimizer.load_state_dict(training_state['optimizer_state_dict'])
+                scheduler.load_state_dict(training_state['scheduler_state_dict'])
+                start_epoch = training_state.get('epoch', start_epoch)
+                global_step = training_state.get('global_step', 0)
+                best_f1 = training_state.get('best_f1', 0)
+                print(f"训练状态已恢复: Epoch {start_epoch}, Step {global_step}, Best F1: {best_f1:.4f}")
+            except Exception as e:
+                print(f"警告: 加载训练状态失败: {e}")
+                print("将使用新的优化器和调度器状态")
+        else:
+            print(f"警告: 训练状态文件不存在: {training_state_path}")
+            print("将使用新的优化器和调度器状态（momentum等会丢失）")
+    
     # 重点：给 Label 1 增加权重，因为分段点在自然段中较少
     # 实际数据分布：不分段:分段 比例约为 3.87:1
     # 使用权重 [1.0, 3.9] 来平衡类别
     weights = torch.tensor(CLASS_WEIGHTS).to(DEVICE)
     criterion = torch.nn.CrossEntropyLoss(weight=weights)
 
-    # 5. 训练循环
+    # 6. 训练循环
     model.train()
     scaler = torch.cuda.amp.GradScaler() if torch.cuda.is_available() else None
+    
+    # 如果从checkpoint恢复，加载scaler状态
+    if resume_from and os.path.exists(checkpoint_path):
+        training_state_path = os.path.join(checkpoint_path, "training_state.pt")
+        if os.path.exists(training_state_path) and scaler is not None:
+            try:
+                training_state = torch.load(training_state_path, map_location=DEVICE)
+                if 'scaler_state_dict' in training_state:
+                    scaler.load_state_dict(training_state['scaler_state_dict'])
+            except:
+                pass
 
-    best_f1 = 0
     patience_counter = 0
 
-    for epoch in range(EPOCHS):
+    for epoch in range(start_epoch, EPOCHS):
         total_loss = 0
         loop = tqdm(train_loader, desc=f"Epoch {epoch+1}/{EPOCHS}")
         
@@ -472,7 +567,22 @@ def train():
         epoch_save_path = os.path.join(SAVE_PATH, f"checkpoint_epoch_{epoch+1}")
         model.save_pretrained(epoch_save_path)
         tokenizer.save_pretrained(epoch_save_path)
-        print(f"Epoch {epoch+1} saved to {epoch_save_path}")
+        
+        # 保存训练状态（优化器、调度器等）
+        training_state = {
+            'epoch': epoch + 1,
+            'global_step': global_step,
+            'optimizer_state_dict': optimizer.state_dict(),
+            'scheduler_state_dict': scheduler.state_dict(),
+            'best_f1': best_f1,
+            'patience_counter': patience_counter,
+        }
+        if scaler is not None:
+            training_state['scaler_state_dict'] = scaler.state_dict()
+        
+        training_state_path = os.path.join(epoch_save_path, "training_state.pt")
+        torch.save(training_state, training_state_path)
+        print(f"Epoch {epoch+1} saved to {epoch_save_path} (包含训练状态)")
 
         # --- 每个 Epoch 结束后的验证逻辑 (放在训练循环内，保存逻辑前) ---
         model.eval()
@@ -533,4 +643,9 @@ def train():
     swanlab.finish()
 
 if __name__ == "__main__":
-    train()
+    import argparse
+    parser = argparse.ArgumentParser(description='训练段落分割模型')
+    parser.add_argument('--resume_from', type=str, default=None,
+                       help='从checkpoint恢复训练，例如: checkpoint_epoch_8')
+    args = parser.parse_args()
+    train(resume_from=args.resume_from)
